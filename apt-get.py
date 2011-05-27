@@ -5,6 +5,7 @@ import os
 import hashlib
 import sys
 import string
+import re
 
 setupini_path = ""
 cache_path = "/setup"
@@ -153,10 +154,13 @@ def install_package(package):
         if localmd5 != mirrormd5:
             print "fatal error: md5 check fail"
             exit(0)
-    
-    #os.system("cat " + localfile+" | bunzip2 | tar > \"/etc/setup/"+package+".lst\" xvf - -C /")
-    os.system("tar -jxvf " + localfile + " -C / > \"/etc/setup/"+package+".lst\"")
-    os.system("gzip -f \"/etc/setup/"+package+".lst\" ")
+    cmdline = "tar -jxvf " + localfile + " -C / > \"/etc/setup/"+package+".lst\""
+    os.system(cmdline)
+    #print cmdline
+    cmdline = "gzip -f \"/etc/setup/"+package+".lst\" "
+    os.system(cmdline)
+    #print cmdline
+
     
     #update local database
     localpackages[package] = [package, package_param[1]]
@@ -241,6 +245,24 @@ def check_upgrade_packages():
             upgradepackages.append(package)
     return upgradepackages
 
+def download_package_source(packages):
+    pwd = os.getcwd()
+    if os.path.exists("/usr/src") == False:
+        os.mkdir("/usr/src")
+    os.chdir("/usr/src")
+    for package in packages:
+        if package in mirrorpackages.keys():
+            if os.path.exists(package) == False:
+                os.mkdir(package)
+            os.chdir(package)
+            url = mirror_path+mirrorpackages[package][3][0]
+            os.system("wget -nc "+url)
+            os.chdir("..")
+        else:
+            print "no such package"
+    os.chdir(pwd)
+            
+
 parser = OptionParser()
 parser.add_option("-u", "--update",dest="update", default=False, action="store_true", help="update setup.ini before install")
 parser.add_option("-m", "--mirror",dest="mirror", help="set the mirror path where we get the packages")
@@ -282,10 +304,27 @@ elif main_arg == "upgrade":
     exit(0)
 elif main_arg == "find":
     parse_database();
+    for package in args:
+        for mirror_package in mirrorpackages.keys():
+            try:
+                patten = re.compile(package)
+            except:
+                print "wrong expression, please use Python style expression"
+                exit(0)
+            match = patten.match(mirror_package)
+            if match:
+                print mirror_package+"-"+mirrorpackages[mirror_package][1]
+    exit(0)
 elif main_arg == "source":
     parse_database();
+    download_package_source(args)
+    exit(0)
 elif main_arg == "remove":
-    parse_database;
+    parse_database()
+    for arg in args:
+        if arg in localpackages.keys():
+            del localpackages[arg]
+    update_local_db()
 else:
     usage();
     exit(0);
