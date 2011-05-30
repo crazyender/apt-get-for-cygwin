@@ -228,8 +228,15 @@ def download_packages(packages):
             totalsize += string.atoi(mirrorpackages[package][2][1], 10)
         print "following packages will be chaged:"
         packagstr = ""
-        for package in dependence_list:
+        for package in packages:
             packagstr += (package + " ")
+        print packagstr
+        print ""
+        print "following additional packages will be installed:"
+        packagstr = ""
+        for package in dependence_list:
+            if (package in packages) == False:
+                packagstr += (package + " ")
         print packagstr
         print "total size is " + sizeof_fmt(totalsize)
         ch = raw_input( "do you want to download these packages? (y/n)) : ")
@@ -287,9 +294,11 @@ def find_package(args):
             except:
                 print "wrong expression, please use Python style expression"
                 exit(0)
-            match = patten.match(mirror_package)
-            if match:
-                find_result.append(mirror_package)
+            matches = patten.findall(mirror_package)
+            for match in matches:
+                if match == mirror_package:
+                    find_result.append(mirror_package)
+                    break
     return find_result
                 
             
