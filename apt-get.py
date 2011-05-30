@@ -261,6 +261,21 @@ def download_package_source(packages):
         else:
             print "no such package"
     os.chdir(pwd)
+
+def find_package(args):
+    find_result = []
+    for package in args:
+        for mirror_package in mirrorpackages.keys():
+            try:
+                patten = re.compile(package)
+            except:
+                print "wrong expression, please use Python style expression"
+                exit(0)
+            match = patten.match(mirror_package)
+            if match:
+                find_result.append(mirror_package)
+    return find_result
+                
             
 
 parser = OptionParser()
@@ -289,9 +304,11 @@ else:
 
 if main_arg == "install":
     parse_database();
-    download_packages(args)
-    if options.noscript == False:
-        run_postscript()
+    find_result = find_package(args)
+    if len(find_result) != 0:
+        download_packages(find_result)
+        if options.noscript == False:
+            run_postscript()
     update_local_db()
     exit(0)
 elif main_arg == "upgrade":
@@ -304,20 +321,15 @@ elif main_arg == "upgrade":
     exit(0)
 elif main_arg == "find":
     parse_database();
-    for package in args:
-        for mirror_package in mirrorpackages.keys():
-            try:
-                patten = re.compile(package)
-            except:
-                print "wrong expression, please use Python style expression"
-                exit(0)
-            match = patten.match(mirror_package)
-            if match:
-                print mirror_package+"-"+mirrorpackages[mirror_package][1]
+    find_result = find_package(args);
+    for mirror_package in find_result:
+        print mirror_package+"-"+mirrorpackages[mirror_package][1]
     exit(0)
 elif main_arg == "source":
     parse_database();
-    download_package_source(args)
+    find_result = find_package(args)
+    if len(find_result) != 0:
+        download_package_source(find_result)
     exit(0)
 elif main_arg == "remove":
     parse_database()
