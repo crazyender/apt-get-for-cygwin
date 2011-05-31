@@ -27,11 +27,13 @@ setupini_path = ""
 cache_path = "/setup"
 mirror_path = "http://mirrors.163.com/cygwin/"
 mirror_name = "";
+# [package] = [package, version, [binurl, size, checksum], [srcurl, srcsize, srcchecksum], required]
 mirrorpackages = {}
+# [package] = [package, version]
 localpackages = {}
 dependence_list = []
 
-
+# calculate the md5 value
 def sumfile(fobj):   
     m = hashlib.md5()
     while True:
@@ -41,7 +43,9 @@ def sumfile(fobj):
         m.update(d)
     return m.hexdigest()
 
-
+# md5 wrapper
+# input:  file path
+# output: md5 value in hex digest
 def md5sum(fname):   
     if fname == '-':
         ret = sumfile(sys.stdin)
@@ -54,12 +58,16 @@ def md5sum(fname):
         f.close()
     return ret
 
+# human readable file size
+# input:  size in dec digest
+# outout: human readable file size in string
 def sizeof_fmt(num):
     for x in ['bytes','KB','MB','GB','TB']:
         if num < 1024.0:
             return "%3.1f%s" % (num, x)
         num /= 1024.0
 
+# parse the site.ini from mirror and get all package info
 def parse_mirror_db():
     package = ""
     version = ""
@@ -112,6 +120,7 @@ def parse_mirror_db():
     file.close()
     os.chdir(cwd)
     
+# parse installed.db and get all installed package info
 def parse_local_db():
     fullname=""
     package=""
@@ -129,8 +138,7 @@ def parse_local_db():
         localpackages[package] = [package, version]
     file.close()
     os.chdir(cwd)
-    
-    
+        
 def parse_database():
     parse_mirror_db()
     parse_local_db()
@@ -147,6 +155,8 @@ def download_setupini():
     os.system("wget "+mirror_path+"setup.ini")
     os.chdir(cwd)
     
+# download and unpack package
+# input: name of the package
 def install_package(package):
     package_param = mirrorpackages[package]
     url = mirror_path+package_param[2][0]
@@ -161,21 +171,28 @@ def install_package(package):
     mirrorurl=package_param[2][0]
     verbs = mirrorurl.split("/")
     localfile=verbs[len(verbs)-1]
-    if os.path.exists(localfile):
-        print "already downloaded, skip"
-    else:
+    if os.path.exists(localfile) == False:
         os.system("wget " + url)
+    else:
+        # the file already downloaded, but may be wrong
+        # give a second chance
         localmd5 = str(md5sum(localfile))
         mirrormd5=package_param[2][2]
         if localmd5 != mirrormd5:
-            print "fatal error: md5 check fail"
-            exit(0)
+            os.system("wget " + url)
+            localmd5 = str(md5sum(localfile))
+            mirrormd5=package_param[2][2]
+            if localmd5 != mirrormd5:
+                print "fatal error: md5 check fail"
+                exit(0)
+        else:
+            print package + " already downloaded"
+
+    # the $package.lst thing is cygwin required
     cmdline = "tar -jxvf " + localfile + " -C / > \"/etc/setup/"+package+".lst\""
     os.system(cmdline)
-    #print cmdline
     cmdline = "gzip -f \"/etc/setup/"+package+".lst\" "
     os.system(cmdline)
-    #print cmdline
 
     
     #update local database
@@ -193,6 +210,10 @@ def run_postscript():
                 os.rename(file, file+".done")
     os.chdir(pwd)
     
+# check all dependence of this package and mark them as install needed
+# input:    name of the package
+# output:   nil
+# modified: dependence_list
 def resolve_dependence(package):
     if package in dependence_list:
         return
@@ -203,7 +224,6 @@ def resolve_dependence(package):
             local_version = localpackages[package][1]
             mirror_version = mirrorpackages[package][1]
             if local_version == mirror_version:
-                #print "package " + package + " already installed, skip"
                 return
         dependence_list.insert(0, package)
         package_param = mirrorpackages[package]
@@ -214,7 +234,10 @@ def resolve_dependence(package):
         print "can not resolve dependence for " + package + ", exit"
         exit(0)
     
-    
+
+# download and install all packages and their dependence
+# input:  list of packages
+# output: nil
 def download_packages(packages):
     global dependence_list
     dependence_list = []
