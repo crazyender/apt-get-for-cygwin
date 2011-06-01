@@ -83,40 +83,42 @@ def parse_mirror_db():
     cwd = os.getcwd()
     os.chdir(setupini_path)
     file = open("setup.ini", 'r')
-    for line in file.readlines():
-        if len(line) == 0 :
-             continue        
-        elif line.startswith("@"):
-            if( len(package) != 0 ):
-                mirrorpackages[package] = [package, version, [binurl, size, checksum], [srcurl, srcsize, srcchecksum], required]   
-            verbs = line.split();
-            package = verbs[1]
-            skipversion = False
-        elif line.startswith("requires:"):
-            verbs = line.split()
-            verbs.pop(0)
-            required = verbs
-        elif line.startswith("version:"):
-            if skipversion != True:
+    context = file.read()
+    blocks = context.split("\n\n")
+    for block in blocks:
+        lines = block.split("\n")
+        for line in lines:
+            if len(line) == 0 :
+                continue        
+            elif line.startswith("@"): 
+                verbs = line.split();
+                package = verbs[1]
+                skipversion = False
+            elif line.startswith("requires:"):
                 verbs = line.split()
-                version = verbs[1]
-        elif line.startswith("install:"):
-              if skipversion != True:
-                verbs = line.split()
-                binurl = verbs[1]
-                size = verbs[2]
-                checksum = verbs[3]
-        elif line.startswith("source:"):
-              if skipversion != True:
-                verbs = line.split()
-                srcurl = verbs[1]
-                srcsize = verbs[2]
-                srcchecksum = verbs[3]
-        elif line.startswith("[prev]"):
-            skipversion = True;
-    
-    if( len(package) != 0 ):
-        mirrorpackages[package] = [package, version, [binurl, size, checksum], [srcurl, srcsize, srcchecksum], required]                       
+                verbs.pop(0)
+                required = verbs
+            elif line.startswith("version:"):
+                if skipversion != True:
+                    verbs = line.split()
+                    version = verbs[1]
+            elif line.startswith("install:"):
+                if skipversion != True:
+                    verbs = line.split()
+                    binurl = verbs[1]
+                    size = verbs[2]
+                    checksum = verbs[3]
+            elif line.startswith("source:"):
+                if skipversion != True:
+                    verbs = line.split()
+                    srcurl = verbs[1]
+                    srcsize = verbs[2]
+                    srcchecksum = verbs[3]
+            elif line.startswith("[prev]"):
+                skipversion = True;
+        if( len(package) != 0 ):
+            mirrorpackages[package] = \
+                [package, version, [binurl, size, checksum], [srcurl, srcsize, srcchecksum], required]                       
     file.close()
     os.chdir(cwd)
     
