@@ -22,16 +22,124 @@ import hashlib
 import sys
 import string
 import re
+import commands
+import urllib2
+import urllib
+from time import time, sleep
+import stat
 
 setupini_path = ""
 cache_path = "/setup"
-mirror_path = "http://mirrors.163.com/cygwin/"
+mirror_path = ""
 mirror_name = "";
 # [package] = [package, version, [binurl, size, checksum], [srcurl, srcsize, srcchecksum], required]
 mirrorpackages = {}
 # [package] = [package, version]
 localpackages = {}
 dependence_list = []
+
+config = {
+          'MIRROR': "http://mirrors.163.com/cygwin/",
+          'CACHE': "/setup"
+          }
+
+def parse_apt_get_config():
+    pwd = os.getcwd()
+    os.chdir(os.environ['HOME'])
+    rc = ".aptgetrc"
+    if os.path.exists(rc) == False:
+        rc = "/etc/aptgetrc"
+        if os.path.exists(rc) == False:
+            os.chdir(pwd)
+            return
+    file = open(rc, 'r')
+    lines = file.readlines()
+    for line in lines:
+        if line.startswith("MIRROR:"):
+            mirror_path = line.replace("MIRROR:", "").strip()
+            if mirror_path.endswith("/") == False:
+                mirror_path += "/"
+            config['MIRROR'] = mirror_path
+        if line.startswith("CACHE:"):
+            cache_path = line.replace("CACHE:", "").strip()
+            config['CACHE'] = cache_path
+    os.chdir(pwd)
+            
+# run external command, exit if external command fail
+# input:  nil
+# output: output of external command
+def run(command):
+    (status, output) = commands.getstatusoutput(command)
+    if status != 0:
+        print "Error in command " + command + "\n" + output
+        exit(status)
+    return output
+
+# human readable file size
+# input:  size in dec digest
+# outout: human readable file size in string
+def sizeof_fmt(num):
+    for x in ['bytes','KB','MB','GB','TB']:
+        if num < 1024.0:
+            return "%3.1f%s" % (num, x)
+        num /= 1024.0
+
+# download url to local path
+# input: 
+#   @url: remote path
+#   @localfile: local path
+# output: nil
+def wget(url, localfile):
+    def get_http_file_size(url):
+        length = 0
+        try:
+            conn = urllib.urlopen(url)
+            headers = conn.info().headers
+            for header in headers:
+                if header.find('Length') != -1:
+                    length = header.split(':')[-1].strip()
+                    length = int(length)
+        except Exception, err:
+            pass
+        return length
+
+    downloadAll = False
+    retries = 1
+    downloaded = 0
+    position = 0
+    totalsize = get_http_file_size(url)
+    startTime = time()
+    print "download " + localfile + ": ",
+    while not downloadAll:
+        if retries > 10:
+            break
+        try:
+            request = urllib2.Request(url)
+            headerrange = (downloaded, totalsize)
+            request.add_header('Range', 'bytes=%d-%d' %headerrange)
+            conn = urllib2.urlopen(request)
+            data = conn.read(1024)
+            while data:
+                f = open(localfile, 'ab')
+                f.write(data)
+                f.close()
+                downloaded += len(data)
+                current = time()
+                duration = current - startTime
+                if (duration >= 2.0) or (downloaded >= totalsize):
+                    startTime = current
+                    speed = float(downloaded - position) / float(duration)
+                    position = downloaded
+                    percent = 100.0 * float(downloaded)/float(totalsize)
+                    sys.stdout.write( "\rdownload %s: %2.1f%%\tspeed: %6s/s"%(localfile, percent, sizeof_fmt(speed)) )
+                    sys.stdout.flush()      
+                data = conn.read(1024)
+            downloadAll = True
+        except Exception, err:
+            print err
+            retries += 1
+            continue
+    print '\n',
 
 # calculate the md5 value
 def sumfile(fobj):   
@@ -58,14 +166,7 @@ def md5sum(fname):
         f.close()
     return ret
 
-# human readable file size
-# input:  size in dec digest
-# outout: human readable file size in string
-def sizeof_fmt(num):
-    for x in ['bytes','KB','MB','GB','TB']:
-        if num < 1024.0:
-            return "%3.1f%s" % (num, x)
-        num /= 1024.0
+
 
 # parse the site.ini from mirror and get all package info
 def parse_mirror_db():
@@ -129,7 +230,7 @@ def parse_local_db():
     cwd = os.getcwd()
     os.chdir("/etc/setup/")
     if os.path.exists("installed.db") == False:
-        os.system("touch installed.db")
+        run("touch installed.db")
     file = open("installed.db", 'r')
     for line in file.readlines():
         verbs = line.split(' ')
@@ -153,12 +254,14 @@ def download_setupini():
     if os.path.exists(setupini_path) == False:
         os.mkdir(setupini_path)
     os.chdir(setupini_path)
-    os.system("rm setup.ini")
-    os.system("wget "+mirror_path+"setup.ini")
+    if os.path.exists("setup.ini"):
+        run("rm setup.ini")
+    wget(mirror_path+"setup.ini", "setup.ini")
     os.chdir(cwd)
     
 # download and unpack package
 # input: name of the package
+# output: nil
 def install_package(package):
     package_param = mirrorpackages[package]
     url = mirror_path+package_param[2][0]
@@ -174,29 +277,31 @@ def install_package(package):
     verbs = mirrorurl.split("/")
     localfile=verbs[len(verbs)-1]
     if os.path.exists(localfile) == False:
-        os.system("wget " + url)
+        wget(url, localfile)
     else:
         # the file already downloaded, but may be wrong
         # give a second chance
         localmd5 = str(md5sum(localfile))
         mirrormd5=package_param[2][2]
         if localmd5 != mirrormd5:
-            os.system("wget " + url)
+            run("rm " + localfile)
+            wget(url, localfile)
             localmd5 = str(md5sum(localfile))
             mirrormd5=package_param[2][2]
             if localmd5 != mirrormd5:
-                print "fatal error: md5 check fail"
+                print "fatal error: " + localfile + " md5 check fail"
                 exit(0)
         else:
             print package + " already downloaded"
 
     # the $package.lst thing is cygwin required
-    cmdline = "tar -jxvf " + localfile + " -C / > \"/etc/setup/"+package+".lst\""
-    os.system(cmdline)
+    cmdline = "tar -jxvf " + localfile + " -C /"
+    output = run(cmdline)
+    file = open("/etc/setup/"+package+".lst", "w+")
+    file.write(output)
+    file.close()
     cmdline = "gzip -f \"/etc/setup/"+package+".lst\" "
-    os.system(cmdline)
-
-    
+    run(cmdline)
     #update local database
     localpackages[package] = [package, package_param[1]]
     
@@ -207,8 +312,9 @@ def run_postscript():
     for parent, dirnames, filenames in os.walk("/etc/postinstall/"):
         for file in filenames:
             if file.endswith(".sh"):
-                os.system("chmod u+x " + file)
-                os.system("./"+file)
+                os.chmod(file, stat.S_IEXEC+stat.S_IREAD+stat.S_IWRITE)
+                print "run postscript " + file
+                run("sh "+file)
                 os.rename(file, file+".done")
     os.chdir(pwd)
     
@@ -304,7 +410,9 @@ def download_package_source(packages):
                 os.mkdir(package)
             os.chdir(package)
             url = mirror_path+mirrorpackages[package][3][0]
-            os.system("wget -nc "+url)
+            verbs = url.split("/")
+            localfile=verbs[len(verbs)-1]
+            wget(url, localfile)
             os.chdir("..")
         else:
             print "no such package"
@@ -328,14 +436,32 @@ def find_package(args):
                 
             
 
-parser = OptionParser()
+parser = OptionParser("apt-get [Options] command")
 parser.add_option("-u", "--update",dest="update", default=False, action="store_true", help="update setup.ini before install")
-parser.add_option("-m", "--mirror",dest="mirror", help="set the mirror path where we get the packages")
-parser.add_option("-c", "--cache",dest="cache", help="set the local cache path")
-parser.add_option("-f", "--file",dest="file", help="rename the package with FILE")
+parser.add_option("-m", "--mirror",dest="mirror", default="", help="set the mirror path where we get the packages")
+parser.add_option("-c", "--cache",dest="cache", default="", help="set the local cache path")
 parser.add_option("-n", "--noscript", dest="noscript", default=False, action="store_true", help="do not run post script file after install")
 (options, args) = parser.parse_args()
 main_arg = args.pop(0)
+
+# parse config file
+# first search ~/.aptgetrc
+# then search /etc/aptgetrc
+parse_apt_get_config()
+
+
+if options.mirror != "":
+        str = options.mirror
+        if str.endswith("/") == False:
+            str += "/"
+        config['MIRROR'] = str
+
+if options.cache != "":
+    str = options.cache
+    config['CACHE'] = str
+
+mirror_path = config['MIRROR']
+cache_path = config['CACHE']
 
 mirror_name=mirror_path.replace(":", "%3a")
 mirror_name=mirror_name.replace("/", "%2f")
@@ -369,13 +495,13 @@ elif main_arg == "upgrade":
         run_postscript()
     update_local_db()
     exit(0)
-elif main_arg == "find":
+elif main_arg == "find" or main_arg == "search":
     parse_database();
     find_result = find_package(args);
     for mirror_package in find_result:
         print mirror_package+"-"+mirrorpackages[mirror_package][1]
     exit(0)
-elif main_arg == "source":
+elif main_arg == "source" or main_arg == "src":
     parse_database();
     find_result = find_package(args)
     if len(find_result) != 0:
@@ -388,7 +514,7 @@ elif main_arg == "remove":
             del localpackages[arg]
     update_local_db()
 else:
-    usage();
+    parser.print_help()
     exit(0);
     
     
