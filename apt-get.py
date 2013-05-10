@@ -252,7 +252,7 @@ def parse_database():
 def download_setupini():
     cwd = os.getcwd()
     if os.path.exists(setupini_path) == False:
-        os.mkdir(setupini_path)
+        os.makedirs(setupini_path)
     os.chdir(setupini_path)
     if os.path.exists("setup.ini"):
         run("rm setup.ini")
@@ -268,10 +268,10 @@ def install_package(package):
     cwd = os.getcwd()
     os.chdir(setupini_path)
     if os.path.exists("release") == False:
-        os.mkdir("release");
+        os.makedirs("release");
     os.chdir("release");
     if os.path.exists(package) == False:
-        os.mkdir(package)
+        os.makedirs(package)
     os.chdir(package)
     mirrorurl=package_param[2][0]
     verbs = mirrorurl.split("/")
@@ -402,12 +402,12 @@ def check_upgrade_packages():
 def download_package_source(packages):
     pwd = os.getcwd()
     if os.path.exists("/usr/src") == False:
-        os.mkdir("/usr/src")
+        os.makedirs("/usr/src")
     os.chdir("/usr/src")
     for package in packages:
         if package in mirrorpackages.keys():
             if os.path.exists(package) == False:
-                os.mkdir(package)
+                os.makedirs(package)
             os.chdir(package)
             url = mirror_path+mirrorpackages[package][3][0]
             verbs = url.split("/")
