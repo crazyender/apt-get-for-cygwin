@@ -18,6 +18,7 @@
 
 from optparse import OptionParser
 import os
+import platform
 import hashlib
 import sys
 import string
@@ -28,20 +29,32 @@ import urllib
 from time import time, sleep
 import stat
 
+useregrex = False;
 setupini_path = ""
 cache_path = "/setup"
 mirror_path = ""
 mirror_name = "";
+httpproxy = "";
+httpsproxy = "";
 # [package] = [package, version, [binurl, size, checksum], [srcurl, srcsize, srcchecksum], required]
 mirrorpackages = {}
 # [package] = [package, version]
 localpackages = {}
 dependence_list = []
+proxies = {}
 
 config = {
-          'MIRROR': "http://mirrors.163.com/cygwin/",
-          'CACHE': "/setup"
-          }
+    'MIRROR': "http://mirrors.sohu.com/cygwin/",
+    'CACHE': "/setup",
+    'HTTP.PROXY' : "",
+    'HTTPS.PROXY' : ""
+}
+unsafe_packages = [
+    '_autorebase',
+    'cygwin',
+    'base-cygwin',
+    'cygwin-debuginfo'
+];
 
 def parse_apt_get_config():
     pwd = os.getcwd()
@@ -63,6 +76,12 @@ def parse_apt_get_config():
         if line.startswith("CACHE:"):
             cache_path = line.replace("CACHE:", "").strip()
             config['CACHE'] = cache_path
+        if line.startswith("HTTP.PROXY:"):
+            cache_path = line.replace("HTTP.PROXY:", "").strip()
+            config['HTTP.PROXY'] = cache_path
+        if line.startswith("HTTPS.PROXY:"):
+            cache_path = line.replace("HTTPS.PROXY:", "").strip()
+            config['HTTPS.PROXY'] = cache_path
     os.chdir(pwd)
             
 # run external command, exit if external command fail
@@ -93,7 +112,7 @@ def wget(url, localfile):
     def get_http_file_size(url):
         length = 0
         try:
-            conn = urllib.urlopen(url)
+            conn = urllib.urlopen(url, proxies=proxies)
             headers = conn.info().headers
             for header in headers:
                 if header.find('Length') != -1:
@@ -131,7 +150,7 @@ def wget(url, localfile):
                     speed = float(downloaded - position) / float(duration)
                     position = downloaded
                     percent = 100.0 * float(downloaded)/float(totalsize)
-                    sys.stdout.write( "\rdownload %s: %2.1f%%\tspeed: %6s/s"%(localfile, percent, sizeof_fmt(speed)) )
+                    sys.stdout.write( "\rdownload %s: %3.1f%%\tspeed: %8s/s"%(localfile, percent, sizeof_fmt(speed)) )
                     sys.stdout.flush()      
                 data = conn.read(1024)
             downloadAll = True
@@ -256,7 +275,14 @@ def download_setupini():
     os.chdir(setupini_path)
     if os.path.exists("setup.ini"):
         run("rm setup.ini")
-    wget(mirror_path+"setup.ini", "setup.ini")
+
+    path = mirror_path
+    if platform.architecture()[0] == '64bit':
+        path += 'x86_64/'
+    else:
+        path += 'x86/'
+    path += "setup.ini"
+    wget(path, "setup.ini")
     os.chdir(cwd)
     
 # download and unpack package
@@ -295,7 +321,7 @@ def install_package(package):
             print package + " already downloaded"
 
     # the $package.lst thing is cygwin required
-    cmdline = "tar -jxvf " + localfile + " -C /"
+    cmdline = "tar -xvf " + localfile + " -C /"
     output = run(cmdline)
     file = open("/etc/setup/"+package+".lst", "w+")
     file.write(output)
@@ -333,11 +359,12 @@ def resolve_dependence(package):
             mirror_version = mirrorpackages[package][1]
             if local_version == mirror_version:
                 return
-        dependence_list.insert(0, package)
-        package_param = mirrorpackages[package]
-        dependences = package_param[4]
-        for dependence in dependences:
-            resolve_dependence(dependence)
+        if package not in unsafe_packages:
+            dependence_list.insert(0, package)
+            package_param = mirrorpackages[package]
+            dependences = package_param[4]
+            for dependence in dependences:
+                resolve_dependence(dependence)
     else:
         print "can not resolve dependence for " + package + ", exit"
         exit(0)
@@ -370,7 +397,7 @@ def download_packages(packages):
                 packagstr += (package + " ")
         print packagstr
         print "total size is " + sizeof_fmt(totalsize)
-        ch = raw_input( "do you want to download these packages? (y/n)) : ")
+        ch = raw_input( "do you want to download these packages? (y/n) : ")
         if ch == "y":
             for package in dependence_list:
                 install_package(package)
@@ -395,7 +422,8 @@ def update_local_db():
 def check_upgrade_packages():
     upgradepackages = []
     for package in localpackages.keys():
-        if (package in mirrorpackages.keys()) and (localpackages[package][1] != mirrorpackages[package][1]):
+        if ( (package in mirrorpackages.keys()) and (localpackages[package][1] != mirrorpackages[package][1])
+            and (package not in unsafe_packages)):
             upgradepackages.append(package)
     return upgradepackages
 
@@ -422,25 +450,32 @@ def find_package(args):
     find_result = []
     for package in args:
         for mirror_package in mirrorpackages.keys():
-            try:
-                patten = re.compile(package)
-            except:
-                print "wrong expression, please use Python style expression"
-                exit(0)
-            matches = patten.findall(mirror_package)
-            for match in matches:
-                if match == mirror_package:
+            if useregrex:
+                try:
+                    patten = re.compile(package)
+                except:
+                    print "wrong expression, please use Python style expression"
+                    exit(0)
+                matches = patten.findall(mirror_package)
+                for match in matches:
+                    if match == mirror_package:
+                        find_result.append(mirror_package)
+                        break
+            else:
+                if mirror_package == package:
                     find_result.append(mirror_package)
-                    break
     return find_result
                 
             
-
+#
+#   Main script block
+#
 parser = OptionParser("apt-get [Options] command")
 parser.add_option("-u", "--update",dest="update", default=False, action="store_true", help="update setup.ini before install")
 parser.add_option("-m", "--mirror",dest="mirror", default="", help="set the mirror path where we get the packages")
 parser.add_option("-c", "--cache",dest="cache", default="", help="set the local cache path")
 parser.add_option("-n", "--noscript", dest="noscript", default=False, action="store_true", help="do not run post script file after install")
+parser.add_option("-e", "--regrex", dest="regrex", default=False, action="store_true", help="find package using python regrex")
 (options, args) = parser.parse_args()
 main_arg = args.pop(0)
 
@@ -449,6 +484,16 @@ main_arg = args.pop(0)
 # then search /etc/aptgetrc
 parse_apt_get_config()
 
+httpproxy = config['HTTP.PROXY']
+httpsproxy = config['HTTPS.PROXY']
+if len(httpproxy) != 0:
+    proxies['http'] = httpproxy
+if  len(httpsproxy) != 0:
+    proxies['https'] = httpsproxy
+
+if len(proxies) != 0:
+    opener = urllib2.build_opener( urllib2.ProxyHandler(proxies) )
+    urllib2.install_opener( opener )
 
 if options.mirror != "":
         str = options.mirror
@@ -459,6 +504,8 @@ if options.mirror != "":
 if options.cache != "":
     str = options.cache
     config['CACHE'] = str
+
+useregrex = options.regrex
 
 mirror_path = config['MIRROR']
 cache_path = config['CACHE']
@@ -516,7 +563,3 @@ elif main_arg == "remove":
 else:
     parser.print_help()
     exit(0);
-    
-    
-
-    
