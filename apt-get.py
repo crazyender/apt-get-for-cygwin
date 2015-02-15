@@ -56,6 +56,13 @@ unsafe_packages = [
     'cygwin-debuginfo'
 ];
 
+
+def filter_unsafe_package(package):
+    if package in unsafe_packages:
+        print "Trying to install an unsafe package " + package
+        print "Please install with cygwin installer"
+        exit(0)
+
 def parse_apt_get_config():
     pwd = os.getcwd()
     os.chdir(os.environ['HOME'])
@@ -150,7 +157,7 @@ def wget(url, localfile):
                     speed = float(downloaded - position) / float(duration)
                     position = downloaded
                     percent = 100.0 * float(downloaded)/float(totalsize)
-                    sys.stdout.write( "\rdownload %s: %3.1f%%\tspeed: %8s/s"%(localfile, percent, sizeof_fmt(speed)) )
+                    sys.stdout.write( "\rdownload %s: %3.1f%% speed: %8s/s"%(localfile, percent, sizeof_fmt(speed)) )
                     sys.stdout.flush()      
                 data = conn.read(1024)
             downloadAll = True
@@ -359,12 +366,12 @@ def resolve_dependence(package):
             mirror_version = mirrorpackages[package][1]
             if local_version == mirror_version:
                 return
-        if package not in unsafe_packages:
-            dependence_list.insert(0, package)
-            package_param = mirrorpackages[package]
-            dependences = package_param[4]
-            for dependence in dependences:
-                resolve_dependence(dependence)
+        filter_unsafe_package(package)
+        dependence_list.insert(0, package)
+        package_param = mirrorpackages[package]
+        dependences = package_param[4]
+        for dependence in dependences:
+            resolve_dependence(dependence)
     else:
         print "can not resolve dependence for " + package + ", exit"
         exit(0)
@@ -377,6 +384,7 @@ def download_packages(packages):
     global dependence_list
     dependence_list = []
     for package in packages:
+        filter_unsafe_package(package)
         resolve_dependence(package)
     if len(dependence_list) == 0:
         print "no package will be changed"
@@ -422,8 +430,8 @@ def update_local_db():
 def check_upgrade_packages():
     upgradepackages = []
     for package in localpackages.keys():
-        if ( (package in mirrorpackages.keys()) and (localpackages[package][1] != mirrorpackages[package][1])
-            and (package not in unsafe_packages)):
+        filter_unsafe_package(package)
+        if ( (package in mirrorpackages.keys()) and (localpackages[package][1] != mirrorpackages[package][1])):
             upgradepackages.append(package)
     return upgradepackages
 
@@ -434,14 +442,16 @@ def download_package_source(packages):
     os.chdir("/usr/src")
     for package in packages:
         if package in mirrorpackages.keys():
-            if os.path.exists(package) == False:
-                os.makedirs(package)
-            os.chdir(package)
+            #if os.path.exists(package) == False:
+            #    os.makedirs(package)
+            #os.chdir(package)
             url = mirror_path+mirrorpackages[package][3][0]
             verbs = url.split("/")
             localfile=verbs[len(verbs)-1]
             wget(url, localfile)
-            os.chdir("..")
+            os.system("tar -xvf " + localfile)
+            os.remove(localfile)
+            #os.chdir("..")
         else:
             print "no such package"
     os.chdir(pwd)
@@ -449,6 +459,9 @@ def download_package_source(packages):
 def find_package(args):
     find_result = []
     for package in args:
+        if (package in mirrorpackages.keys()):
+            find_result.append(package)
+            continue
         for mirror_package in mirrorpackages.keys():
             if useregrex:
                 try:
@@ -462,7 +475,7 @@ def find_package(args):
                         find_result.append(mirror_package)
                         break
             else:
-                if mirror_package == package:
+                if mirror_package.startswith(package):
                     find_result.append(mirror_package)
     return find_result
                 
